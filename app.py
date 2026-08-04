@@ -120,23 +120,34 @@ def cargar_datos_vtex():
 def cargar_inversion_ads():
     df_meta, df_google = pd.DataFrame(), pd.DataFrame()
 
+    def limpiar_numero(serie):
+        """Limpia símbolos de moneda $, puntos de miles y comas decimales."""
+        s = serie.astype(str).str.replace('$', '', regex=False).str.strip()
+        # Si tiene puntos y comas (ej: 1.500,50), quitar puntos y reemplazar coma por punto
+        s = s.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+        return pd.to_numeric(s, errors='coerce').fillna(0)
+
+    # 1. Procesar Meta Ads
     if META_PATH.exists():
         df_m = pd.read_csv(META_PATH, low_memory=False)
         col_fecha = [c for c in df_m.columns if 'fecha' in c.lower() or 'date' in c.lower() or 'day' in c.lower()]
         col_costo = [c for c in df_m.columns if 'importe' in c.lower() or 'gastado' in c.lower() or 'spend' in c.lower()]
+        
         if col_fecha and col_costo:
-            df_m['Fecha'] = pd.to_datetime(df_m[col_fecha[0]], errors='coerce').dt.date
-            df_m['Inversion'] = pd.to_numeric(df_m[col_costo[0]].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-            df_meta = df_m[['Fecha', 'Inversion']].copy()
+            df_m['Fecha_Clean'] = pd.to_datetime(df_m[col_fecha[0]], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
+            df_m['Inversion'] = limpiar_numero(df_m[col_costo[0]])
+            df_meta = df_m[['Fecha_Clean', 'Inversion']].copy()
 
+    # 2. Procesar Google Ads
     if GOOGLE_PATH.exists():
         df_g = pd.read_csv(GOOGLE_PATH, low_memory=False)
         col_fecha = [c for c in df_g.columns if 'fecha' in c.lower() or 'date' in c.lower() or 'day' in c.lower()]
         col_costo = [c for c in df_g.columns if 'coste' in c.lower() or 'cost' in c.lower()]
+        
         if col_fecha and col_costo:
-            df_g['Fecha'] = pd.to_datetime(df_g[col_fecha[0]], errors='coerce').dt.date
-            df_g['Inversion'] = pd.to_numeric(df_g[col_costo[0]].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
-            df_google = df_g[['Fecha', 'Inversion']].copy()
+            df_g['Fecha_Clean'] = pd.to_datetime(df_g[col_fecha[0]], format='mixed', dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d')
+            df_g['Inversion'] = limpiar_numero(df_g[col_costo[0]])
+            df_google = df_g[['Fecha_Clean', 'Inversion']].copy()
 
     return df_meta, df_google
 
@@ -300,12 +311,17 @@ var_ordenes = ((ordenes_actual - ordenes_comp) / ordenes_comp * 100) if ordenes_
 
 unidades_actual = df_f['Quantity_SKU'].sum()
 
-dias_actuales = df_f['Día'].dropna().unique()
-inv_meta_tot = df_meta[df_meta['Fecha'].isin(dias_actuales)]['Inversion'].sum() if not df_meta.empty else 0
-inv_google_tot = df_google[df_google['Fecha'].isin(dias_actuales)]['Inversion'].sum() if not df_google.empty else 0
+# Convertir las fechas filtradas de VTEX al mismo formato de texto 'YYYY-MM-DD'
+dias_actuales_str = pd.to_datetime(df_f['Creation Date']).dt.strftime('%Y-%m-%d').dropna().unique().tolist()
+
+# Sumar la inversión que coincida en el rango de días
+inv_meta_tot = df_meta[df_meta['Fecha_Clean'].isin(dias_actuales_str)]['Inversion'].sum() if not df_meta.empty else 0.0
+inv_google_tot = df_google[df_google['Fecha_Clean'].isin(dias_actuales_str)]['Inversion'].sum() if not df_google.empty else 0.0
+
 inversion_total = inv_meta_tot + inv_google_tot
 
-roas = (ventas_actual / inversion_total) if inversion_total > 0 else 0
+# Cálculo de ROAS
+roas = (ventas_actual / inversion_total) if inversion_total > 0 else 0.0
 
 
 # ==========================================================
