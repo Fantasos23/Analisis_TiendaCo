@@ -68,12 +68,41 @@ def generar_dataset_vtex_por_orden():
     if 'Total Value' in df_sub.columns:
         df_sub['Total Value'] = pd.to_numeric(df_sub['Total Value'].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
 
-    # Convertir textos a string limpio para evitar errores al concatenar
+    # Convertir textos a string limpio para evitar errores al concatenar o comparar
     cols_texto = [c for c in cols_existentes if c not in ['Order', 'Quantity_SKU', 'Total Value']]
     for c in cols_texto:
         df_sub[c] = df_sub[c].fillna('').astype(str).str.strip()
 
-    print(f"📊 Total de ítems/filas iniciales: {len(df_sub):,}")
+    # ==========================================================
+    # NUEVO: ELIMINAR FILAS COMPLETAMENTE DUPLICADAS
+    # ==========================================================
+    filas_iniciales = len(df_sub)
+    df_sub = df_sub.drop_duplicates().copy()
+    filas_desduplicadas = len(df_sub)
+    duplicados_removidos = filas_iniciales - filas_desduplicadas
+
+    if duplicados_removidos > 0:
+        print(f"🧹 Se eliminaron {duplicados_removidos:,} filas exactamente duplicadas.")
+    else:
+        print("✨ No se encontraron filas duplicadas en el dataset.")
+
+    # ==========================================================
+    # FILTRAR Y ELIMINAR ÓRDENES CANCELADAS (ES/EN)
+    # ==========================================================
+    if 'Status' in df_sub.columns:
+        # Palabras clave de cancelación en español e inglés
+        patron_cancelado = 'cancel' # Captura cancelado, cancelada, canceled, cancelled, etc.
+        
+        # Identificar las IDs de orden que contengan estado de cancelación
+        ordenes_canceladas = df_sub[
+            df_sub['Status'].str.lower().str.contains(patron_cancelado, na=False)
+        ]['Order'].unique()
+
+        if len(ordenes_canceladas) > 0:
+            print(f"🚫 Eliminando {len(ordenes_canceladas):,} órdenes canceladas (detectadas en ES/EN)...")
+            df_sub = df_sub[~df_sub['Order'].isin(ordenes_canceladas)].copy()
+
+    print(f"📊 Total de ítems/filas a procesar: {len(df_sub):,}")
     print("🔄 Agrupando por 'Order'...")
 
     # 3. Definir diccionario de reglas de agregación por columna
@@ -107,7 +136,7 @@ def generar_dataset_vtex_por_orden():
             errors='coerce'
         )
         
-        # Encontrar la fecha de la primera compra de cada cliente (solo documentos válidos)
+        # Encontrar la fecha de la primera compra válida de cada cliente (sin tomar en cuenta canceladas)
         mask_doc_valido = df_agrupado['Client Document'].astype(str).str.strip() != ''
         df_agrupado.loc[mask_doc_valido, 'First_Purchase_Date'] = df_agrupado[mask_doc_valido].groupby('Client Document')['Creation Date_DT'].transform('min')
         
@@ -126,7 +155,7 @@ def generar_dataset_vtex_por_orden():
     df_agrupado.to_csv(SALIDA_VTEX_AGRUPADO, index=False, encoding='utf-8-sig')
 
     print(f"\n✅ Proceso completado exitosamente:")
-    print(f"  • Filas iniciales (ítems): {len(df_sub):,}")
+    print(f"  • Filas procesadas (válidas): {len(df_sub):,}")
     print(f"  • Órdenes únicas finales: {len(df_agrupado):,}")
     print(f"📁 Guardado en: {SALIDA_VTEX_AGRUPADO}")
 
